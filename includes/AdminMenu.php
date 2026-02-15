@@ -342,7 +342,12 @@ class AdminMenu {
         }
 
         // Check if settings were saved
-        if (isset($_GET['settings-updated'])) {
+        $settings_updated = false;
+        if (isset($_GET['settings-updated'])) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $settings_updated = sanitize_text_field(wp_unslash($_GET['settings-updated'])); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        }
+
+        if ($settings_updated) {
             add_settings_error(
                 'samrat_cache_messages',
                 'samrat_cache_message',
@@ -365,7 +370,8 @@ class AdminMenu {
                 </div>
                 <div class="samrat-cache-version">
                     <?php 
-                    printf(esc_html__('Version %s', 'samrat-website-cache'), SAMRAT_WEBSITE_CACHE_VERSION); ?>
+                    /* translators: %s: Plugin version */
+                    printf(esc_html__('Version %s', 'samrat-website-cache'), esc_html(SAMRAT_WEBSITE_CACHE_VERSION)); ?>
                 </div>
             </div>
 
@@ -395,8 +401,8 @@ class AdminMenu {
                     </div>
                     
                     <div class="samrat-cache-stat-card">
-                        <div class="stat-icon status <?php echo $options['enable_page_cache'] ? 'active' : 'inactive'; ?>">
-                            <span class="dashicons dashicons-<?php echo $options['enable_page_cache'] ? 'yes-alt' : 'dismiss'; ?>"></span>
+                        <div class="stat-icon status <?php echo esc_attr($options['enable_page_cache'] ? 'active' : 'inactive'); ?>">
+                            <span class="dashicons dashicons-<?php echo esc_attr($options['enable_page_cache'] ? 'yes-alt' : 'dismiss'); ?>"></span>
                         </div>
                         <div class="stat-content">
                             <span class="stat-value"><?php echo $options['enable_page_cache'] ? esc_html__('Active', 'samrat-website-cache') : esc_html__('Inactive', 'samrat-website-cache'); ?></span>
@@ -546,7 +552,8 @@ class AdminMenu {
         if ($result['success']) {
             wp_send_json_success(array(
                 'message' => sprintf(
-                    __('Successfully cleared %d cached files (%s)', 'samrat-website-cache'),
+                    /* translators: 1: number of files, 2: total size */
+                    __('Successfully cleared %1$d cached files (%2$s)', 'samrat-website-cache'),
                     $result['files_deleted'],
                     $result['size_cleared']
                 )
@@ -578,6 +585,7 @@ class AdminMenu {
             foreach ($files as $file) {
                 if (is_file($file)) {
                     $total_size += filesize($file);
+                    // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
                     if (unlink($file)) {
                         $files_deleted++;
                     }

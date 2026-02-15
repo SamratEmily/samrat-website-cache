@@ -56,18 +56,27 @@ function samrat_website_cache_activate() {
         add_option('samrat_website_cache_settings', $defaults);
     }
 
-    // Create cache directory
+    // Create cache directory and security files using WP_Filesystem
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    WP_Filesystem();
+    global $wp_filesystem;
+
     $cache_dir = SAMRAT_WEBSITE_CACHE_PLUGIN_DIR . 'cache/';
-    if (!file_exists($cache_dir)) {
-        wp_mkdir_p($cache_dir);
+    if (!$wp_filesystem->exists($cache_dir)) {
+        $wp_filesystem->mkdir($cache_dir);
     }
 
     // Create .htaccess for cache directory (deny direct access)
     $htaccess_file = $cache_dir . '.htaccess';
-    if (!file_exists($htaccess_file)) {
-        $htaccess_content = "Order deny,allow\nDeny from all";
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-        file_put_contents($htaccess_file, $htaccess_content);
+    if (!$wp_filesystem->exists($htaccess_file)) {
+        $htaccess_content = "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Order deny,allow\n    Deny from all\n</IfModule>";
+        $wp_filesystem->put_contents($htaccess_file, $htaccess_content);
+    }
+
+    // Create index.php to prevent directory listing
+    $index_file = $cache_dir . 'index.php';
+    if (!$wp_filesystem->exists($index_file)) {
+        $wp_filesystem->put_contents($index_file, '<?php // Silence is golden');
     }
 }
 register_activation_hook(__FILE__, 'samrat_website_cache_activate');
@@ -76,16 +85,20 @@ register_activation_hook(__FILE__, 'samrat_website_cache_activate');
  * Deactivation hook - clear cache
  */
 function samrat_website_cache_deactivate() {
-    // Clear all cache on deactivation
+    // Clear all cache on deactivation using WP_Filesystem
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    WP_Filesystem();
+    global $wp_filesystem;
+
     $cache_dir = SAMRAT_WEBSITE_CACHE_PLUGIN_DIR . 'cache/';
     
-    if (file_exists($cache_dir)) {
-        $files = glob($cache_dir . '*.html');
-        if ($files) {
-            foreach ($files as $file) {
-                if (is_file($file)) {
-                    // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
-                    unlink($file);
+    if ($wp_filesystem->exists($cache_dir)) {
+        // Use wp_filesystem->dirlist to clear files
+        $file_list = $wp_filesystem->dirlist($cache_dir);
+        if ($file_list) {
+            foreach ($file_list as $file_name => $file_info) {
+                if ($file_info['type'] === 'f' && strpos($file_name, '.html') !== false) {
+                    $wp_filesystem->delete($cache_dir . $file_name);
                 }
             }
         }

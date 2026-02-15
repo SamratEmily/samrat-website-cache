@@ -102,7 +102,12 @@ class CacheHandler {
         }
 
         // Don't cache POST requests
-        if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'GET') {
+        $request_method = '';
+        if (isset($_SERVER['REQUEST_METHOD'])) {
+            $request_method = sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD']));
+        }
+
+        if ($request_method !== 'GET') {
             return false;
         }
 
@@ -118,7 +123,8 @@ class CacheHandler {
 
         // Don't serve cache if logged in (check cookie)
         if (!$this->settings['cache_logged_users']) {
-            foreach ($_COOKIE as $key => $value) {
+            $cookies = wp_unslash($_COOKIE);
+            foreach ($cookies as $key => $value) {
                 if (strpos($key, 'wordpress_logged_in_') === 0) {
                     return false;
                 }
@@ -150,7 +156,12 @@ class CacheHandler {
         }
 
         // Don't cache POST requests
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+        $request_method = '';
+        if (isset($_SERVER['REQUEST_METHOD'])) {
+            $request_method = sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD']));
+        }
+
+        if ($request_method !== 'GET') {
             return false;
         }
 
@@ -209,7 +220,7 @@ class CacheHandler {
         }
 
         $excluded = array_filter(array_map('trim', explode("\n", $excluded_pages)));
-        $current_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+        $current_uri = isset($_SERVER['REQUEST_URI']) ? esc_url_raw(wp_unslash($_SERVER['REQUEST_URI'])) : '';
 
         foreach ($excluded as $pattern) {
             if (empty($pattern)) {
@@ -244,9 +255,10 @@ class CacheHandler {
         }
 
         $excluded = array_filter(array_map('trim', explode("\n", $excluded_cookies)));
+        $cookies  = wp_unslash($_COOKIE);
 
         foreach ($excluded as $cookie_name) {
-            if (isset($_COOKIE[$cookie_name]) && !empty($_COOKIE[$cookie_name])) {
+            if (isset($cookies[$cookie_name]) && !empty($cookies[$cookie_name])) {
                 return true;
             }
         }
@@ -532,14 +544,15 @@ class CacheHandler {
      * @return string
      */
     private function get_cache_key() {
-        $uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '/';
-        $host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '';
+        $uri = isset($_SERVER['REQUEST_URI']) ? esc_url_raw(wp_unslash($_SERVER['REQUEST_URI'])) : '/';
+        $host = isset($_SERVER['HTTP_HOST']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_HOST'])) : '';
         
         $key_parts = array($host, $uri);
         
         // Include user state in key if caching for logged-in users
         if ($this->settings['cache_logged_users']) {
-            foreach ($_COOKIE as $key => $value) {
+            $cookies = wp_unslash($_COOKIE);
+            foreach ($cookies as $key => $value) {
                 if (strpos($key, 'wordpress_logged_in_') === 0) {
                     $key_parts[] = 'logged_in';
                     break;
