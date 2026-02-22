@@ -212,8 +212,10 @@ class AdminMenu {
             $sanitized[$field] = isset($input[$field]) ? 1 : 0;
         }
         
-        // Select fields
-        $sanitized['cache_expiry'] = isset($input['cache_expiry']) ? absint($input['cache_expiry']) : 86400;
+        // Select fields - whitelist against the values offered in the UI
+        $allowed_expiry = array(3600, 7200, 21600, 43200, 86400, 604800);
+        $expiry = isset($input['cache_expiry']) ? absint($input['cache_expiry']) : 86400;
+        $sanitized['cache_expiry'] = in_array($expiry, $allowed_expiry, true) ? $expiry : 86400;
         
         // Textarea fields
         $sanitized['exclude_pages'] = isset($input['exclude_pages']) ? sanitize_textarea_field($input['exclude_pages']) : '';
@@ -469,7 +471,7 @@ class AdminMenu {
                             </li>
                             <li>
                                 <span class="label"><?php esc_html_e('Cache Directory:', 'samrat-website-cache'); ?></span>
-                                <span class="value code">/wp-content/plugins/samrat-website-cache/cache/</span>
+                                <span class="value code">/wp-content/cache/samrat-website-cache/</span>
                             </li>
                         </ul>
                     </div>
@@ -567,7 +569,7 @@ class AdminMenu {
      * Clear all cache files
      */
     public function clear_all_cache() {
-        $cache_dir = SAMRAT_WEBSITE_CACHE_PLUGIN_DIR . 'cache/';
+        $cache_dir = SAMRAT_WEBSITE_CACHE_DIR;
         
         if (!file_exists($cache_dir)) {
             return array(
@@ -604,7 +606,7 @@ class AdminMenu {
      * Get cache statistics
      */
     public function get_cache_stats() {
-        $cache_dir = SAMRAT_WEBSITE_CACHE_PLUGIN_DIR . 'cache/';
+        $cache_dir = SAMRAT_WEBSITE_CACHE_DIR;
         $total_files = 0;
         $total_size = 0;
 
@@ -644,7 +646,7 @@ class AdminMenu {
     /**
      * Get default options
      */
-    public function get_default_options() {
+    public static function get_default_options() {
         return array(
             'enable_page_cache' => 1,
             'cache_logged_users' => 0,
@@ -661,8 +663,8 @@ class AdminMenu {
      * Static method to get settings
      */
     public static function get_settings() {
-        $instance = new self();
-        $options = get_option(self::OPTION_NAME, $instance->get_default_options());
-        return wp_parse_args($options, $instance->get_default_options());
+        $defaults = self::get_default_options();
+        $options  = get_option(self::OPTION_NAME, $defaults);
+        return wp_parse_args($options, $defaults);
     }
 }

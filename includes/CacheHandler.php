@@ -49,9 +49,9 @@ class CacheHandler {
         add_action('deactivated_plugin', array($this, 'clear_all_cache'));
         add_action('upgrader_process_complete', array($this, 'clear_all_cache'));
         
-        // WooCommerce specific hooks
-        add_action('woocommerce_product_set_stock', array($this, 'clear_cache_on_update'));
-        add_action('woocommerce_variation_set_stock', array($this, 'clear_cache_on_update'));
+        // WooCommerce specific hooks — these pass WC_Product objects, so use a dedicated handler.
+        add_action('woocommerce_product_set_stock', array($this, 'clear_cache_on_wc_stock_update'));
+        add_action('woocommerce_variation_set_stock', array($this, 'clear_cache_on_wc_stock_update'));
     }
 
     /**
@@ -319,36 +319,52 @@ class CacheHandler {
         }
 
         $this->can_cache = true;
-        
-        // Start output buffering with callback
-        ob_start(array($this, 'cache_output_callback'));
+
+        // Start output buffering - explicitly closed in end_cache() via shutdown hook
+        ob_start();
+        add_action('shutdown', array($this, 'end_cache'), 0);
     }
 
     /**
-     * Output buffer callback - processes and caches content
+     * End output buffering, process and cache the captured content
      *
-     * @param string $content The buffered output
-     * @return string The processed output
+     * Explicitly closes the buffer opened in start_cache() so the buffer
+     * is always paired with a closing call within a traceable code path.
      */
-    public function cache_output_callback($content) {
-        // Don't cache if we shouldn't
-        if (!$this->can_cache) {
-            return $content;
+    public function end_cache() {
+        if (!$this->can_cache || ob_get_level() === 0) {
+            return;
         }
 
+        $content = ob_get_clean();
+
+        // Process and save to cache
+        $this->process_and_cache($content);
+
+        // Output original content to browser
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+        echo $content;
+    }
+
+    /**
+     * Process buffered output and save to cache file
+     *
+     * @param string $content The buffered output
+     */
+    private function process_and_cache($content) {
         // Don't cache empty content
         if (empty($content)) {
-            return $content;
+            return;
         }
 
         // Don't cache if it doesn't look like a complete HTML page
         if (strpos($content, '</html>') === false && strpos($content, '</HTML>') === false) {
-            return $content;
+            return;
         }
 
         // Don't cache error pages
         if (http_response_code() !== 200) {
-            return $content;
+            return;
         }
 
         // Apply minification if enabled
@@ -359,8 +375,6 @@ class CacheHandler {
 
         // Save the cache content to a file
         $this->save_cache($cached_content);
-
-        return $content; // Return original content to browser
     }
 
     /**
@@ -530,7 +544,7 @@ class CacheHandler {
      * @return string
      */
     private function get_cache_file() {
-        $cache_dir = SAMRAT_WEBSITE_CACHE_PLUGIN_DIR . 'cache/';
+        $cache_dir = SAMRAT_WEBSITE_CACHE_DIR;
         
         // Create a unique cache key based on URL and user state
         $cache_key = $this->get_cache_key();
@@ -545,8 +559,12 @@ class CacheHandler {
      */
     private function get_cache_key() {
         $uri = isset($_SERVER['REQUEST_URI']) ? esc_url_raw(wp_unslash($_SERVER['REQUEST_URI'])) : '/';
-        $host = isset($_SERVER['HTTP_HOST']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_HOST'])) : '';
-        
+
+        // Use the configured site host rather than the user-supplied HTTP_HOST header.
+        // HTTP_HOST is fully attacker-controlled and using it directly would allow
+        // cache pollution via forged Host headers (disk exhaustion attack).
+        $host = (string) wp_parse_url(home_url(), PHP_URL_HOST);
+
         $key_parts = array($host, $uri);
         
         // Include user state in key if caching for logged-in users
@@ -561,6 +579,20 @@ class CacheHandler {
         }
         
         return md5(implode('|', $key_parts));
+    }
+
+    /**
+     * Clear cache when WooCommerce stock changes.
+     *
+     * woocommerce_product_set_stock and woocommerce_variation_set_stock both pass
+     * a WC_Product (or WC_Product_Variation) object rather than a plain integer ID.
+     *
+     * @param object $product WC_Product or WC_Product_Variation instance.
+     */
+    public function clear_cache_on_wc_stock_update($product) {
+        if (is_a($product, 'WC_Product')) {
+            $this->clear_cache_on_update($product->get_id());
+        }
     }
 
     /**
@@ -589,29 +621,52 @@ class CacheHandler {
                 $uri = isset($parsed['path']) ? $parsed['path'] : '/';
                 $query = isset($parsed['query']) ? '?' . $parsed['query'] : '';
                 $host = isset($parsed['host']) ? $parsed['host'] : wp_parse_url(home_url(), PHP_URL_HOST);
-                
+
+                // Normalise with esc_url_raw() so the key matches what get_cache_key() produces.
+                $normalized_uri = esc_url_raw($uri . $query);
+
                 // Clear non-logged-in cache
-                $cache_key = md5($host . '|' . $uri . $query);
-                $cache_file = SAMRAT_WEBSITE_CACHE_PLUGIN_DIR . 'cache/' . $cache_key . '.html';
-                
+                $cache_key = md5($host . '|' . $normalized_uri);
+                $cache_file = SAMRAT_WEBSITE_CACHE_DIR . $cache_key . '.html';
+
                 if (file_exists($cache_file)) {
                     // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
                     @unlink($cache_file);
                 }
+
+                // Clear logged-in user cache variant if that feature is enabled
+                if ($this->settings['cache_logged_users']) {
+                    $logged_in_key  = md5($host . '|' . $normalized_uri . '|logged_in');
+                    $logged_in_file = SAMRAT_WEBSITE_CACHE_DIR . $logged_in_key . '.html';
+                    if (file_exists($logged_in_file)) {
+                        // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+                        @unlink($logged_in_file);
+                    }
+                }
             }
         }
-        
+
         // Also clear homepage cache
         $home_url = home_url('/');
         $parsed = wp_parse_url($home_url);
         $host = isset($parsed['host']) ? $parsed['host'] : '';
-        
+
         $home_cache_key = md5($host . '|/');
-        $home_cache_file = SAMRAT_WEBSITE_CACHE_PLUGIN_DIR . 'cache/' . $home_cache_key . '.html';
-        
+        $home_cache_file = SAMRAT_WEBSITE_CACHE_DIR . $home_cache_key . '.html';
+
         if (file_exists($home_cache_file)) {
             // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
             @unlink($home_cache_file);
+        }
+
+        // Clear logged-in homepage cache variant if that feature is enabled
+        if ($this->settings['cache_logged_users']) {
+            $home_logged_in_key  = md5($host . '|/|logged_in');
+            $home_logged_in_file = SAMRAT_WEBSITE_CACHE_DIR . $home_logged_in_key . '.html';
+            if (file_exists($home_logged_in_file)) {
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+                @unlink($home_logged_in_file);
+            }
         }
     }
 
@@ -619,7 +674,7 @@ class CacheHandler {
      * Clear all cache files
      */
     public function clear_all_cache() {
-        $cache_dir = SAMRAT_WEBSITE_CACHE_PLUGIN_DIR . 'cache/';
+        $cache_dir = SAMRAT_WEBSITE_CACHE_DIR;
         
         if (!file_exists($cache_dir)) {
             return;

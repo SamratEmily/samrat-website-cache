@@ -15,20 +15,19 @@
         $('.samrat-cache-toast').remove();
 
         var iconClass = type === 'success' ? 'yes-alt' : 'warning';
-        var toast = $(
-            '<div class="samrat-cache-toast ' + type + '">' +
-            '<span class="dashicons dashicons-' + iconClass + '"></span>' +
-            '<span>' + message + '</span>' +
-            '</div>'
-        );
 
-        $('body').append(toast);
+        // Build DOM nodes instead of concatenating HTML to prevent XSS
+        var $toast = $('<div>').addClass('samrat-cache-toast ' + type);
+        $toast.append($('<span>').addClass('dashicons dashicons-' + iconClass));
+        $toast.append($('<span>').text(message)); // .text() escapes the message safely
+
+        $('body').append($toast);
 
         // Auto remove after 4 seconds
         setTimeout(function () {
-            toast.addClass('hiding');
+            $toast.addClass('hiding');
             setTimeout(function () {
-                toast.remove();
+                $toast.remove();
             }, 300);
         }, 4000);
     }
@@ -129,12 +128,6 @@
      * Global function for admin bar
      */
     window.samratClearCacheFromBar = function () {
-        if (typeof samratCache === 'undefined') {
-            // If on frontend or script not loaded, redirect to admin
-            window.location.href = '/wp-admin/admin.php?page=samrat-cache-clear';
-            return;
-        }
-
         $.ajax({
             url: samratCache.ajaxUrl,
             type: 'POST',

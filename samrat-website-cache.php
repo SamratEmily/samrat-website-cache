@@ -20,6 +20,11 @@ define('SAMRAT_WEBSITE_CACHE_VERSION', '1.0.0');
 define('SAMRAT_WEBSITE_CACHE_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('SAMRAT_WEBSITE_CACHE_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('SAMRAT_WEBSITE_CACHE_PLUGIN_FILE', __FILE__);
+// Cache stored outside the plugin directory so it is not bundled with plugin
+// updates and sits at the conventional wp-content/cache/ location.
+// On Apache, a .htaccess inside the directory denies direct HTTP access.
+// On nginx, add: location ~* /cache/samrat-website-cache/ { deny all; }
+define('SAMRAT_WEBSITE_CACHE_DIR', WP_CONTENT_DIR . '/cache/samrat-website-cache/');
 
 /**
  * Initialize the plugin
@@ -58,12 +63,14 @@ function samrat_website_cache_activate() {
 
     // Create cache directory and security files using WP_Filesystem
     require_once ABSPATH . 'wp-admin/includes/file.php';
-    WP_Filesystem();
+    if (!WP_Filesystem()) {
+        return; // Filesystem not available (e.g. requires FTP credentials); skip silently.
+    }
     global $wp_filesystem;
 
-    $cache_dir = SAMRAT_WEBSITE_CACHE_PLUGIN_DIR . 'cache/';
+    $cache_dir = SAMRAT_WEBSITE_CACHE_DIR;
     if (!$wp_filesystem->exists($cache_dir)) {
-        $wp_filesystem->mkdir($cache_dir);
+        $wp_filesystem->mkdir($cache_dir, FS_CHMOD_DIR, true);
     }
 
     // Create .htaccess for cache directory (deny direct access)
@@ -87,17 +94,19 @@ register_activation_hook(__FILE__, 'samrat_website_cache_activate');
 function samrat_website_cache_deactivate() {
     // Clear all cache on deactivation using WP_Filesystem
     require_once ABSPATH . 'wp-admin/includes/file.php';
-    WP_Filesystem();
+    if (!WP_Filesystem()) {
+        return; // Filesystem not available; skip cache clear.
+    }
     global $wp_filesystem;
 
-    $cache_dir = SAMRAT_WEBSITE_CACHE_PLUGIN_DIR . 'cache/';
-    
+    $cache_dir = SAMRAT_WEBSITE_CACHE_DIR;
+
     if ($wp_filesystem->exists($cache_dir)) {
         // Use wp_filesystem->dirlist to clear files
         $file_list = $wp_filesystem->dirlist($cache_dir);
         if ($file_list) {
             foreach ($file_list as $file_name => $file_info) {
-                if ($file_info['type'] === 'f' && strpos($file_name, '.html') !== false) {
+                if ($file_info['type'] === 'f' && pathinfo($file_name, PATHINFO_EXTENSION) === 'html') {
                     $wp_filesystem->delete($cache_dir . $file_name);
                 }
             }
@@ -124,8 +133,8 @@ function samrat_website_cache_admin_bar_scripts() {
         wp_enqueue_script('jquery');
         wp_add_inline_script('jquery', '
             var samratCache = {
-                ajaxUrl: "' . admin_url('admin-ajax.php') . '",
-                nonce: "' . wp_create_nonce('samrat_cache_nonce') . '",
+                ajaxUrl: "' . esc_js(admin_url('admin-ajax.php')) . '",
+                nonce: "' . esc_js(wp_create_nonce('samrat_cache_nonce')) . '",
                 clearingText: "' . esc_js(__('Clearing...', 'samrat-website-cache')) . '",
                 clearedText: "' . esc_js(__('Cache Cleared!', 'samrat-website-cache')) . '",
                 errorText: "' . esc_js(__('Error clearing cache', 'samrat-website-cache')) . '"

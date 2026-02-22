@@ -138,6 +138,19 @@ You can also check the response headers for `X-Samrat-Cache: HIT`.
 = 1.0.0 =
 Initial release of Samrat Website Cache. Install to improve your website's performance!
 
+== External Services ==
+
+This plugin does **not** connect to any external APIs or third-party services. All caching is performed locally on your server — rendered pages are saved as static HTML files inside the plugin's own `cache/` directory and served directly from there.
+
+**WordPress REST API discovery links in cached content**
+
+WordPress core automatically injects a `<link rel="https://api.w.org/">` tag and a link to `xmlrpc.php` into every page's `<head>` section. When this plugin caches a page, those links are stored as part of the cached HTML exactly as WordPress generated them. This plugin does not itself send any data to `api.w.org` or any other remote host; it simply preserves whatever markup WordPress core has already rendered.
+
+No user data is collected, transmitted, or processed by this plugin. If you need information about WordPress core's own REST API or XML-RPC endpoints, please refer to:
+
+* WordPress.org Privacy Policy: https://wordpress.org/about/privacy/
+* WordPress.org Terms of Service: https://wordpress.org/about/license/
+
 == Additional Info ==
 
 = Minimum Requirements =
