@@ -27,6 +27,14 @@ class CacheHandler {
     private $can_cache = false;
 
     /**
+     * Output buffer nesting level recorded just before ob_start() is called.
+     * Used in end_cache() to verify the buffer is still open before closing it.
+     *
+     * @var int
+     */
+    private $ob_level = 0;
+
+    /**
      * Constructor
      */
     public function __construct() {
@@ -312,11 +320,10 @@ class CacheHandler {
     /**
      * Start output buffering for cache.
      *
-     * ob_start() is paired with its closing mechanism in a single call: the
-     * $callback argument. PHP guarantees that cache_output_callback() will be
-     * invoked — and the buffer closed — when the output buffer is flushed at
-     * the end of the request. No separate shutdown hook is needed to close the
-     * buffer, so the open/close pair lives within the same logical flow.
+     * Opens a plain output buffer and registers end_cache() on the WordPress
+     * 'shutdown' action so the buffer is explicitly closed via ob_get_clean()
+     * within a deterministic, WordPress-aware hook rather than relying on PHP's
+     * end-of-request flush sequence.
      */
     public function start_cache() {
         // Final check if we should cache this page
@@ -324,27 +331,38 @@ class CacheHandler {
             return;
         }
 
-        $this->can_cache = true;
+        $this->can_cache  = true;
+        $this->ob_level   = ob_get_level();
 
-        ob_start(array($this, 'cache_output_callback'));
+        ob_start();
+
+        add_action( 'shutdown', array( $this, 'end_cache' ), 0 );
     }
 
     /**
-     * Output-buffer callback: process, cache and return page content.
+     * Close the output buffer opened by start_cache(), cache the content,
+     * and send it to the browser.
      *
-     * PHP calls this automatically when it closes the buffer opened by
-     * ob_start() in start_cache(). Returning the content sends it to the
-     * browser; the buffer is closed by PHP as part of the same flush cycle.
-     *
-     * @param string $content Buffered page output.
-     * @return string The original content, unchanged, for delivery to the browser.
+     * Hooked to WordPress 'shutdown' at priority 0 so it runs before WordPress
+     * itself flushes any remaining buffers.
      */
-    public function cache_output_callback($content) {
-        if ($this->can_cache) {
-            $this->process_and_cache($content);
+    public function end_cache() {
+        if ( ! $this->can_cache ) {
+            return;
         }
 
-        return $content;
+        // Only close the buffer we opened; bail if something else already closed it.
+        if ( ob_get_level() <= $this->ob_level ) {
+            return;
+        }
+
+        $content = ob_get_clean();
+
+        if ( false !== $content ) {
+            $this->process_and_cache( $content );
+            // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+            echo $content;
+        }
     }
 
     /**
