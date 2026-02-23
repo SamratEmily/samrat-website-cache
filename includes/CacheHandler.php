@@ -310,7 +310,13 @@ class CacheHandler {
     }
 
     /**
-     * Start output buffering for cache
+     * Start output buffering for cache.
+     *
+     * ob_start() is paired with its closing mechanism in a single call: the
+     * $callback argument. PHP guarantees that cache_output_callback() will be
+     * invoked — and the buffer closed — when the output buffer is flushed at
+     * the end of the request. No separate shutdown hook is needed to close the
+     * buffer, so the open/close pair lives within the same logical flow.
      */
     public function start_cache() {
         // Final check if we should cache this page
@@ -320,30 +326,25 @@ class CacheHandler {
 
         $this->can_cache = true;
 
-        // Start output buffering - explicitly closed in end_cache() via shutdown hook
-        ob_start();
-        add_action('shutdown', array($this, 'end_cache'), 0);
+        ob_start(array($this, 'cache_output_callback'));
     }
 
     /**
-     * End output buffering, process and cache the captured content
+     * Output-buffer callback: process, cache and return page content.
      *
-     * Explicitly closes the buffer opened in start_cache() so the buffer
-     * is always paired with a closing call within a traceable code path.
+     * PHP calls this automatically when it closes the buffer opened by
+     * ob_start() in start_cache(). Returning the content sends it to the
+     * browser; the buffer is closed by PHP as part of the same flush cycle.
+     *
+     * @param string $content Buffered page output.
+     * @return string The original content, unchanged, for delivery to the browser.
      */
-    public function end_cache() {
-        if (!$this->can_cache || ob_get_level() === 0) {
-            return;
+    public function cache_output_callback($content) {
+        if ($this->can_cache) {
+            $this->process_and_cache($content);
         }
 
-        $content = ob_get_clean();
-
-        // Process and save to cache
-        $this->process_and_cache($content);
-
-        // Output original content to browser
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-        echo $content;
+        return $content;
     }
 
     /**
