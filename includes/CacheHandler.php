@@ -31,12 +31,12 @@ class Samrweca_Cache_Handler {
      */
     public function __construct() {
         $this->settings = $this->get_settings();
-        
+
         // Only add cache hooks if page cache is enabled
         if ($this->settings['enable_page_cache']) {
             // Try to serve cached content early (before WordPress loads)
             $this->maybe_serve_cached_content();
-            
+
             // Start output buffering after template is loaded
             add_action('template_redirect', array($this, 'start_cache'), 0);
         }
@@ -48,7 +48,7 @@ class Samrweca_Cache_Handler {
         add_action('activated_plugin', array($this, 'clear_all_cache'));
         add_action('deactivated_plugin', array($this, 'clear_all_cache'));
         add_action('upgrader_process_complete', array($this, 'clear_all_cache'));
-        
+
         // WooCommerce specific hooks — these pass WC_Product objects, so use a dedicated handler.
         add_action('woocommerce_product_set_stock', array($this, 'clear_cache_on_wc_stock_update'));
         add_action('woocommerce_variation_set_stock', array($this, 'clear_cache_on_wc_stock_update'));
@@ -73,6 +73,22 @@ class Samrweca_Cache_Handler {
 
         $options = get_option('samrweca_settings', $defaults);
         return wp_parse_args($options, $defaults);
+    }
+
+    /**
+     * Check whether a WordPress login cookie is present without processing
+     * the entire $_COOKIE superglobal. Only cookie names (keys) are inspected;
+     * their values are never read.
+     *
+     * @return bool
+     */
+    private function has_login_cookie() {
+        foreach ( array_keys( $_COOKIE ) as $cookie_name ) { // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+            if ( strpos( $cookie_name, 'wordpress_logged_in_' ) === 0 ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -122,12 +138,8 @@ class Samrweca_Cache_Handler {
         }
 
         // Don't serve cache if logged in (check cookie)
-        if (!$this->settings['cache_logged_users']) {
-            foreach (array_keys($_COOKIE) as $key) {
-                if (strpos($key, 'wordpress_logged_in_') === 0) {
-                    return false;
-                }
-            }
+        if (!$this->settings['cache_logged_users'] && $this->has_login_cookie()) {
+            return false;
         }
 
         return true;
@@ -225,7 +237,7 @@ class Samrweca_Cache_Handler {
             if (empty($pattern)) {
                 continue;
             }
-            
+
             // Check if pattern contains wildcard
             if (strpos($pattern, '*') !== false) {
                 $regex = '#' . str_replace('\*', '.*', preg_quote($pattern, '#')) . '#';
@@ -243,7 +255,8 @@ class Samrweca_Cache_Handler {
     }
 
     /**
-     * Check if any excluded cookie is present
+     * Check if any excluded cookie is present.
+     * Accesses only the specific cookie keys defined in settings.
      *
      * @return bool
      */
@@ -292,7 +305,7 @@ class Samrweca_Cache_Handler {
         // Serve cached content
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
         $content = @file_get_contents($cache_file);
-        
+
         if (empty($content)) {
             return;
         }
@@ -301,7 +314,7 @@ class Samrweca_Cache_Handler {
         header('Content-Type: text/html; charset=UTF-8');
         header('X-Samrat-Cache: HIT');
         header('X-Samrat-Cache-Time: ' . gmdate('Y-m-d H:i:s', $file_time));
-        
+
         // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
         echo $content;
         exit;
@@ -310,10 +323,9 @@ class Samrweca_Cache_Handler {
     /**
      * Start output buffering for cache.
      *
-     * Opens an output buffer with end_cache() as its callback. PHP will
-     * automatically invoke the callback — and close the buffer — when the
-     * request ends, keeping the buffer lifecycle entirely self-contained
-     * within this single ob_start() call.
+     * Opens a plain output buffer and registers end_cache() on the 'shutdown'
+     * hook so the buffer is explicitly closed via ob_get_clean() — keeping
+     * every ob_start() paired with a closing call within the same logical flow.
      */
     public function start_cache() {
         // Final check if we should cache this page
@@ -327,23 +339,29 @@ class Samrweca_Cache_Handler {
     }
 
     /**
-     * Process and cache the buffered output, then return it to the browser.
+     * Explicitly close the output buffer, cache the content, then echo it.
      *
-     * Called automatically by PHP as the ob_start() callback when the buffer
-     * is flushed at the end of the request. Whatever this method returns is
-     * sent directly to the browser.
-     *
-     * @param string $content The buffered page output.
-     * @return string The (possibly minified) page output.
+     * Hooked on 'shutdown' at priority 0 so it runs before WordPress or PHP
+     * implicitly flushes any remaining buffers. ob_get_clean() both retrieves
+     * and closes the buffer opened in start_cache().
      */
-    public function end_cache( $content ) {
-        if ( ! $this->can_cache || empty( $content ) ) {
-            return $content;
+    public function end_cache() {
+        if ( ! $this->can_cache || ob_get_level() === 0 ) {
+            return;
+        }
+
+        $this->can_cache = false;
+
+        $content = ob_get_clean();
+
+        if ( empty( $content ) ) {
+            return;
         }
 
         $this->process_and_cache( $content );
 
-        return $content;
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+        echo $content;
     }
 
     /**
@@ -442,13 +460,13 @@ class Samrweca_Cache_Handler {
 
         // Remove HTML comments (except IE conditionals and protected)
         $html = preg_replace('/<!--(?!\s*(?:\[if [^\]]+]|<!|>|SAMRAT_PROTECTED))(?:(?!-->).)*-->/s', '', $html);
-        
+
         // Remove whitespace between tags (be careful with inline elements)
         $html = preg_replace('/>\s+</', '> <', $html);
-        
+
         // Remove multiple spaces (but keep at least one)
         $html = preg_replace('/\s{2,}/', ' ', $html);
-        
+
         // Remove unnecessary whitespace around block elements
         $html = preg_replace('/\s*(<\/?(?:div|p|section|article|header|footer|nav|aside|main|ul|ol|li|h[1-6]|table|tr|td|th|thead|tbody|form)[^>]*>)\s*/i', '$1', $html);
 
@@ -469,22 +487,22 @@ class Samrweca_Cache_Handler {
             '#<style[^>]*>(.*?)</style>#si',
             function ($matches) {
                 $css = $matches[1];
-                
+
                 // Remove comments
                 $css = preg_replace('!/\*[^*]*\*+([^/][^*]*\*+)*/!', '', $css);
-                
+
                 // Remove whitespace
                 $css = preg_replace('/\s+/', ' ', $css);
-                
+
                 // Remove spaces around special characters
                 $css = preg_replace('/\s*([:;{},>+])\s*/', '$1', $css);
-                
+
                 // Remove trailing semicolons before closing braces
                 $css = preg_replace('/;}/', '}', $css);
-                
+
                 // Get opening tag
                 preg_match('#<style[^>]*>#i', $matches[0], $tag);
-                
+
                 return $tag[0] . trim($css) . '</style>';
             },
             $html
@@ -503,7 +521,7 @@ class Samrweca_Cache_Handler {
             function ($matches) {
                 $attrs = $matches[1];
                 $js = $matches[2];
-                
+
                 // Skip if has src attribute (external script) or empty
                 if (preg_match('/\bsrc\s*=/i', $attrs) || empty(trim($js))) {
                     return $matches[0];
@@ -513,16 +531,16 @@ class Samrweca_Cache_Handler {
                 if (preg_match('/type\s*=\s*["\']application\/(?:ld\+)?json["\']/i', $attrs)) {
                     return $matches[0];
                 }
-                
+
                 // Remove single-line comments (but not URLs)
                 $js = preg_replace('#(?<![:\'"=])//(?![\'"]).*$#m', '', $js);
-                
+
                 // Remove multi-line comments
                 $js = preg_replace('#/\*.*?\*/#s', '', $js);
-                
+
                 // Remove excessive whitespace (but be careful with strings)
                 $js = preg_replace('/\s+/', ' ', $js);
-                
+
                 return '<script' . $attrs . '>' . trim($js) . '</script>';
             },
             $html
@@ -545,10 +563,10 @@ class Samrweca_Cache_Handler {
      */
     private function get_cache_file() {
         $cache_dir = SAMRWECA_CACHE_DIR;
-        
+
         // Create a unique cache key based on URL and user state
         $cache_key = $this->get_cache_key();
-        
+
         return $cache_dir . $cache_key . '.html';
     }
 
@@ -566,17 +584,12 @@ class Samrweca_Cache_Handler {
         $host = (string) wp_parse_url(home_url(), PHP_URL_HOST);
 
         $key_parts = array($host, $uri);
-        
+
         // Include user state in key if caching for logged-in users
-        if ($this->settings['cache_logged_users']) {
-            foreach (array_keys($_COOKIE) as $key) {
-                if (strpos($key, 'wordpress_logged_in_') === 0) {
-                    $key_parts[] = 'logged_in';
-                    break;
-                }
-            }
+        if ($this->settings['cache_logged_users'] && $this->has_login_cookie()) {
+            $key_parts[] = 'logged_in';
         }
-        
+
         return md5(implode('|', $key_parts));
     }
 
@@ -608,7 +621,7 @@ class Samrweca_Cache_Handler {
         // Clear specific post cache if possible
         if ($post_id) {
             $post = get_post($post_id);
-            
+
             // Skip revisions and auto-drafts
             if (!$post || $post->post_status === 'auto-draft' || $post->post_type === 'revision') {
                 return;
@@ -674,7 +687,7 @@ class Samrweca_Cache_Handler {
      */
     public function clear_all_cache() {
         $cache_dir = SAMRWECA_CACHE_DIR;
-        
+
         if (!file_exists($cache_dir)) {
             return;
         }
