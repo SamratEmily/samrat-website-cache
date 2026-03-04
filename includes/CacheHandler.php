@@ -10,7 +10,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class CacheHandler {
+class Samrweca_Cache_Handler {
 
     /**
      * Cache settings
@@ -25,14 +25,6 @@ class CacheHandler {
      * @var bool
      */
     private $can_cache = false;
-
-    /**
-     * Output buffer nesting level recorded just before ob_start() is called.
-     * Used in end_cache() to verify the buffer is still open before closing it.
-     *
-     * @var int
-     */
-    private $ob_level = 0;
 
     /**
      * Constructor
@@ -79,7 +71,7 @@ class CacheHandler {
             'exclude_cookies' => "woocommerce_cart_hash\nwoocommerce_items_in_cart",
         );
 
-        $options = get_option('samrat_website_cache_settings', $defaults);
+        $options = get_option('samrweca_settings', $defaults);
         return wp_parse_args($options, $defaults);
     }
 
@@ -131,8 +123,7 @@ class CacheHandler {
 
         // Don't serve cache if logged in (check cookie)
         if (!$this->settings['cache_logged_users']) {
-            $cookies = wp_unslash($_COOKIE);
-            foreach ($cookies as $key => $value) {
+            foreach (array_keys($_COOKIE) as $key) {
                 if (strpos($key, 'wordpress_logged_in_') === 0) {
                     return false;
                 }
@@ -263,10 +254,9 @@ class CacheHandler {
         }
 
         $excluded = array_filter(array_map('trim', explode("\n", $excluded_cookies)));
-        $cookies  = wp_unslash($_COOKIE);
 
         foreach ($excluded as $cookie_name) {
-            if (isset($cookies[$cookie_name]) && !empty($cookies[$cookie_name])) {
+            if (!empty($_COOKIE[$cookie_name])) {
                 return true;
             }
         }
@@ -320,10 +310,10 @@ class CacheHandler {
     /**
      * Start output buffering for cache.
      *
-     * Opens a plain output buffer and registers end_cache() on the WordPress
-     * 'shutdown' action so the buffer is explicitly closed via ob_get_clean()
-     * within a deterministic, WordPress-aware hook rather than relying on PHP's
-     * end-of-request flush sequence.
+     * Opens an output buffer with end_cache() as its callback. PHP will
+     * automatically invoke the callback — and close the buffer — when the
+     * request ends, keeping the buffer lifecycle entirely self-contained
+     * within this single ob_start() call.
      */
     public function start_cache() {
         // Final check if we should cache this page
@@ -331,38 +321,29 @@ class CacheHandler {
             return;
         }
 
-        $this->can_cache  = true;
-        $this->ob_level   = ob_get_level();
+        $this->can_cache = true;
 
-        ob_start();
-
-        add_action( 'shutdown', array( $this, 'end_cache' ), 0 );
+        ob_start( array( $this, 'end_cache' ) );
     }
 
     /**
-     * Close the output buffer opened by start_cache(), cache the content,
-     * and send it to the browser.
+     * Process and cache the buffered output, then return it to the browser.
      *
-     * Hooked to WordPress 'shutdown' at priority 0 so it runs before WordPress
-     * itself flushes any remaining buffers.
+     * Called automatically by PHP as the ob_start() callback when the buffer
+     * is flushed at the end of the request. Whatever this method returns is
+     * sent directly to the browser.
+     *
+     * @param string $content The buffered page output.
+     * @return string The (possibly minified) page output.
      */
-    public function end_cache() {
-        if ( ! $this->can_cache ) {
-            return;
+    public function end_cache( $content ) {
+        if ( ! $this->can_cache || empty( $content ) ) {
+            return $content;
         }
 
-        // Only close the buffer we opened; bail if something else already closed it.
-        if ( ob_get_level() <= $this->ob_level ) {
-            return;
-        }
+        $this->process_and_cache( $content );
 
-        $content = ob_get_clean();
-
-        if ( false !== $content ) {
-            $this->process_and_cache( $content );
-            // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-            echo $content;
-        }
+        return $content;
     }
 
     /**
@@ -563,7 +544,7 @@ class CacheHandler {
      * @return string
      */
     private function get_cache_file() {
-        $cache_dir = SAMRAT_WEBSITE_CACHE_DIR;
+        $cache_dir = SAMRWECA_CACHE_DIR;
         
         // Create a unique cache key based on URL and user state
         $cache_key = $this->get_cache_key();
@@ -588,8 +569,7 @@ class CacheHandler {
         
         // Include user state in key if caching for logged-in users
         if ($this->settings['cache_logged_users']) {
-            $cookies = wp_unslash($_COOKIE);
-            foreach ($cookies as $key => $value) {
+            foreach (array_keys($_COOKIE) as $key) {
                 if (strpos($key, 'wordpress_logged_in_') === 0) {
                     $key_parts[] = 'logged_in';
                     break;
@@ -646,7 +626,7 @@ class CacheHandler {
 
                 // Clear non-logged-in cache
                 $cache_key = md5($host . '|' . $normalized_uri);
-                $cache_file = SAMRAT_WEBSITE_CACHE_DIR . $cache_key . '.html';
+                $cache_file = SAMRWECA_CACHE_DIR . $cache_key . '.html';
 
                 if (file_exists($cache_file)) {
                     // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
@@ -656,7 +636,7 @@ class CacheHandler {
                 // Clear logged-in user cache variant if that feature is enabled
                 if ($this->settings['cache_logged_users']) {
                     $logged_in_key  = md5($host . '|' . $normalized_uri . '|logged_in');
-                    $logged_in_file = SAMRAT_WEBSITE_CACHE_DIR . $logged_in_key . '.html';
+                    $logged_in_file = SAMRWECA_CACHE_DIR . $logged_in_key . '.html';
                     if (file_exists($logged_in_file)) {
                         // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
                         @unlink($logged_in_file);
@@ -671,7 +651,7 @@ class CacheHandler {
         $host = isset($parsed['host']) ? $parsed['host'] : '';
 
         $home_cache_key = md5($host . '|/');
-        $home_cache_file = SAMRAT_WEBSITE_CACHE_DIR . $home_cache_key . '.html';
+        $home_cache_file = SAMRWECA_CACHE_DIR . $home_cache_key . '.html';
 
         if (file_exists($home_cache_file)) {
             // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
@@ -681,7 +661,7 @@ class CacheHandler {
         // Clear logged-in homepage cache variant if that feature is enabled
         if ($this->settings['cache_logged_users']) {
             $home_logged_in_key  = md5($host . '|/|logged_in');
-            $home_logged_in_file = SAMRAT_WEBSITE_CACHE_DIR . $home_logged_in_key . '.html';
+            $home_logged_in_file = SAMRWECA_CACHE_DIR . $home_logged_in_key . '.html';
             if (file_exists($home_logged_in_file)) {
                 // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
                 @unlink($home_logged_in_file);
@@ -693,7 +673,7 @@ class CacheHandler {
      * Clear all cache files
      */
     public function clear_all_cache() {
-        $cache_dir = SAMRAT_WEBSITE_CACHE_DIR;
+        $cache_dir = SAMRWECA_CACHE_DIR;
         
         if (!file_exists($cache_dir)) {
             return;

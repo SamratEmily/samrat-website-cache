@@ -626,6 +626,15 @@
     height: 20px;
 }
 
+@keyframes samrweca-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.samrweca-spin {
+    animation: samrweca-spin 1s linear infinite;
+}
+
 @keyframes slideIn {
     from {
         transform: translateX(100%);

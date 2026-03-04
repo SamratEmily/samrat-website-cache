@@ -43,26 +43,23 @@
         var originalText = $button.html();
         $button.addClass('loading');
         $button.html(
-            '<span class="dashicons dashicons-update" style="animation: spin 1s linear infinite;"></span> ' +
-            samratCache.clearingText
+            '<span class="dashicons dashicons-update samrweca-spin"></span> ' +
+            samrwecaCache.clearingText
         );
 
-        // Add spin animation
-        $('<style>@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }</style>').appendTo('head');
-
         $.ajax({
-            url: samratCache.ajaxUrl,
+            url: samrwecaCache.ajaxUrl,
             type: 'POST',
             data: {
-                action: 'samrat_clear_cache',
-                nonce: samratCache.nonce
+                action: 'samrweca_clear_cache',
+                nonce: samrwecaCache.nonce
             },
             success: function (response) {
                 if (response.success) {
                     $button.removeClass('loading').addClass('success');
                     $button.html(
                         '<span class="dashicons dashicons-yes-alt"></span> ' +
-                        samratCache.clearedText
+                        samrwecaCache.clearedText
                     );
                     showToast(response.data.message, 'success');
 
@@ -77,13 +74,13 @@
                 } else {
                     $button.removeClass('loading');
                     $button.html(originalText);
-                    showToast(response.data.message || samratCache.errorText, 'error');
+                    showToast(response.data.message || samrwecaCache.errorText, 'error');
                 }
             },
             error: function () {
                 $button.removeClass('loading');
                 $button.html(originalText);
-                showToast(samratCache.errorText, 'error');
+                showToast(samrwecaCache.errorText, 'error');
             }
         });
     }
@@ -127,23 +124,23 @@
     /**
      * Global function for admin bar
      */
-    window.samratClearCacheFromBar = function () {
+    window.samrwecaClearCacheFromBar = function () {
         $.ajax({
-            url: samratCache.ajaxUrl,
+            url: samrwecaCache.ajaxUrl,
             type: 'POST',
             data: {
-                action: 'samrat_clear_cache',
-                nonce: samratCache.nonce
+                action: 'samrweca_clear_cache',
+                nonce: samrwecaCache.nonce
             },
             success: function (response) {
                 if (response.success) {
                     showToast(response.data.message, 'success');
                 } else {
-                    showToast(response.data.message || 'Error clearing cache', 'error');
+                    showToast(response.data.message || samrwecaCache.errorText, 'error');
                 }
             },
             error: function () {
-                showToast('Error clearing cache', 'error');
+                showToast(samrwecaCache.errorText, 'error');
             }
         });
     };
